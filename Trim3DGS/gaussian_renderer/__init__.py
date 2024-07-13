@@ -46,7 +46,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         record_transmittance=record_transmittance,
-        debug=pipe.debug
+        debug=pipe.debug,
+        depth_weight=pipe.depth_weight
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -101,7 +102,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         transmittance = transmittance_sum / (num_covered_pixels + 1e-6)
         return transmittance
     else:
-        rendered_image, rendered_extra_feats, median_depth, radii = output
+        rendered_image, rendered_extra_feats, median_depth, mean_depth, radii = output
         # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
         # They will be excluded from value updates used in the splitting criteria.
         return {"render": rendered_image,
@@ -109,4 +110,5 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
                 "viewspace_points": screenspace_points,
                 "visibility_filter" : radii > 0,
                 "radii": radii,
-                "median_depth": median_depth}
+                "median_depth": median_depth,
+                "mean_depth": mean_depth}

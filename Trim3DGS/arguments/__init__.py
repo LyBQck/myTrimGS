@@ -66,6 +66,10 @@ class PipelineParams(ParamGroup):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
         self.debug = False
+
+        self.depth_weight = 0.0
+        self.record_depth = True
+        self.record_depth_interval = 500
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):

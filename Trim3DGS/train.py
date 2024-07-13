@@ -49,20 +49,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):
-        # if network_gui.conn == None:
-        #     network_gui.try_connect()
-        # while network_gui.conn != None:
-        #     try:
-        #         net_image_bytes = None
-        #         custom_cam, do_training, pipe.convert_SHs_python, pipe.compute_cov3D_python, keep_alive, scaling_modifer = network_gui.receive()
-        #         if custom_cam != None:
-        #             net_image = render(custom_cam, gaussians, pipe, background, scaling_modifer)["render"]
-        #             net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
-        #         network_gui.send(net_image_bytes, dataset.source_path)
-        #         if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
-        #             break
-        #     except Exception as e:
-        #         network_gui.conn = None
+        if iteration == 999:
+            aaa = 0
 
         iter_start.record()
 
@@ -85,6 +73,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        
+        # record depth maps
+        if pipe.record_depth and iteration % pipe.record_depth_interval == 0:
+            mean_depth = render_pkg["mean_depth"]
+            median_depth = render_pkg["median_depth"]
+            record_depth(dataset.model_path, mean_depth, median_depth, iteration)
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
@@ -189,6 +183,24 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
             tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
+
+def record_depth(path, mean_depth, median_depth, iteration):
+    save_root = path + "/depth_maps/"+ str(iteration)
+    os.makedirs(save_root, exist_ok = True)
+    with open (save_root + "/mean_depth.txt", "w") as f:
+        f.write(write_mat(mean_depth[0]))
+    with open (save_root + "/median_depth.txt", "w") as f:
+        f.write(write_mat(median_depth[0]))
+    with open (save_root + "/mean_median_diff.txt", "w") as f:
+        f.write(str((mean_depth - median_depth).abs().mean().item()))
+
+def write_mat(mat, size=20):
+    out_str = ""
+    for i in range(size):
+        for j in range(size):
+            out_str += "{:.3f} ".format(mat[i, j])
+        out_str += "\n"
+    return out_str
 
 if __name__ == "__main__":
     # Set up command line argument parser
