@@ -70,6 +70,10 @@ class PipelineParams(ParamGroup):
         self.depth_weight = 0.0
         self.record_depth = True
         self.record_depth_interval = 500
+        self.tune_depth_from_iter = 7000
+        self.tune_depth = False
+
+        self.depth_opac_weight = 0.0
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):

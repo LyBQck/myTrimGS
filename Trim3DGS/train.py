@@ -48,9 +48,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+
+    if pipe.tune_depth:
+        recorded_depth_weight = pipe.depth_weight
+        pipe.depth_weight = 0.0
+        assert recorded_depth_weight > 0
+
     for iteration in range(first_iter, opt.iterations + 1):
         if iteration == 999:
             aaa = 0
+
+        if pipe.tune_depth and iteration >= pipe.tune_depth_from_iter:
+            pipe.depth_weight = recorded_depth_weight
 
         iter_start.record()
 
@@ -79,6 +88,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             mean_depth = render_pkg["mean_depth"]
             median_depth = render_pkg["median_depth"]
             record_depth(dataset.model_path, mean_depth, median_depth, iteration)
+        
+        # test edited kernel
+        # pos3D = gaussians.get_xyz
+        # pos3D = torch.cat((pos3D, torch.ones_like(pos3D[:, :1])), dim=1) @ viewpoint_cam.world_view_transform
+        # gs_camera_z = pos3D[:, 2:3]
+        # depth_map = render(viewpoint_cam, gaussians, pipe, bg, override_color=gs_camera_z.repeat(1, 3))["render"][0]
+        # mean_depth = render_pkg["mean_depth"]
+        # record_depth(dataset.model_path, mean_depth, depth_map[None], iteration)
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
@@ -98,7 +115,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), dataset.model_path)
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -147,7 +164,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, write_path):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
@@ -175,6 +192,14 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+
+                opacity_tuple = (scene.gaussians.get_opacity.max().item(), scene.gaussians.get_opacity.min().item(), scene.gaussians.get_opacity.mean().item())
+                
+                sqrt_sigma = (scene.gaussians.get_scaling[:, 0:1] * scene.gaussians.get_scaling[:, 1:2] * scene.gaussians.get_scaling[:, 2:3])
+                scale_tuple = (sqrt_sigma.max().item(), sqrt_sigma.min().item(), sqrt_sigma.mean().item())
+
+                write_log(write_path, iteration, config['name'], l1_test, psnr_test, scene.gaussians.get_xyz.shape[0], opacity_tuple, scale_tuple)
+
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
@@ -184,21 +209,38 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
+
+def write_log(path, iters, name, l1, psnr, num_points, opacity_tuple, scale_tuple):
+    opac_max, opac_min, opac_mean = opacity_tuple
+    with open(os.path.join(path, "log.txt"), "a") as log_file:
+        log_file.write("Iteration {} - {}: L1 {:.3} PSNR {:.4}\n".format(iters, name, l1, psnr))
+        if str(name) == "train":
+            log_file.write("Total points: {}\n".format(num_points))
+            log_file.write("Opacity max: {:.3} min: {:.3} mean: {:.3}\n".format(opac_max, opac_min, opac_mean))
+            log_file.write("Scale max: {:.3} min: {:.3} mean: {:.3}\n".format(scale_tuple[0], scale_tuple[1], scale_tuple[2]))
+            log_file.write("\n")
+
 def record_depth(path, mean_depth, median_depth, iteration):
+    thres = 1.5
     save_root = path + "/depth_maps/"+ str(iteration)
     os.makedirs(save_root, exist_ok = True)
     with open (save_root + "/mean_depth.txt", "w") as f:
         f.write(write_mat(mean_depth[0]))
+        f.write("\nmean: {:.3f}".format(mean_depth[mean_depth > thres].abs().mean().item()))
     with open (save_root + "/median_depth.txt", "w") as f:
         f.write(write_mat(median_depth[0]))
+        f.write("\nmean: {:.3f}".format(median_depth[median_depth > thres].abs().mean().item()))
     with open (save_root + "/mean_median_diff.txt", "w") as f:
         f.write(str((mean_depth - median_depth).abs().mean().item()))
 
-def write_mat(mat, size=20):
+def write_mat(mat, size=20, step=20):
     out_str = ""
     for i in range(size):
         for j in range(size):
-            out_str += "{:.3f} ".format(mat[i, j])
+            try:
+                out_str += "{:.3f} ".format(mat[i * step, j* step])
+            except:
+                pass
         out_str += "\n"
     return out_str
 
