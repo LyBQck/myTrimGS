@@ -35,6 +35,21 @@ def report_dtu(path, iteration):
         n += 1
     print(f"Overall: {sum_overall / n}")
 
+    sum_overall = 0
+    n = 0
+    print("***************** PSNR *****************")
+    for scan in sorted(scans, key=lambda x: int(x.replace('scan', ''))):
+        p = os.path.join(path, scan, 'results.json')
+        if not os.path.exists(p):
+            continue
+        with open(p, 'r') as f:
+            data = json.load(f)
+            data = data[f'ours_{iteration}']
+            print(scan, data, scan)
+        sum_overall += data['PSNR']
+        n += 1
+    print(f"Overall: {sum_overall / n}")
+    
 def report_mipnerf360(path, iteration):
     print(f'Results of {path}')
     scans = os.listdir(path)
