@@ -67,6 +67,11 @@ class PipelineParams(ParamGroup):
         self.compute_cov3D_python = False
         self.depth_ratio = 0.0
         self.debug = False
+
+        self.tune_depth = False
+        self.tune_depth_from_iter = 1000
+        self.debug_depth = False
+        self.save_images = False
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):
@@ -83,6 +88,7 @@ class OptimizationParams(ParamGroup):
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
         self.lambda_dist = 100.0
+        self.lambda_dist_alpha = 100.0
         self.lambda_normal = 0.05
         self.opacity_cull = 0.05
 

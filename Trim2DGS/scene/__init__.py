@@ -17,12 +17,13 @@ from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+from utils.debug_utils import create_debug_ply, create_debug_cam
 
 class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0], pretrained_ply_path=None):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0], pretrained_ply_path=None, debug=False):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -40,7 +41,14 @@ class Scene:
 
         self.train_cameras = {}
         self.test_cameras = {}
-
+        
+        if debug:
+            debug_cam = create_debug_cam()
+            self.train_cameras[1.0] = [debug_cam]
+            pcd_debug = create_debug_ply(self.train_cameras[1.0][0])
+            self.gaussians.create_from_pcd(pcd_debug, 1.903, debug=True, debug_view=self.train_cameras[1.0][0])
+            return
+        
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
