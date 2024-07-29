@@ -10,7 +10,7 @@
 #
 
 import os
-import torch
+import torch, torchvision
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -29,10 +29,14 @@ except ImportError:
     TENSORBOARD_FOUND = False
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
+
+    if pipe.debug_depth:
+        opt.iterations = 500
+
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = Scene(dataset, gaussians)
+    scene = Scene(dataset, gaussians, debug=pipe.debug_depth)
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -68,7 +72,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         
         render_pkg = render(viewpoint_cam, gaussians, pipe, background)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-        
+
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
@@ -76,22 +80,46 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # regularization
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
         lambda_dist = opt.lambda_dist if iteration > 3000 else 0.0
+        lambda_dist_alpha = opt.lambda_dist_alpha if pipe.tune_depth and (iteration > pipe.tune_depth_from_iter) else 0.0
 
         rend_dist = render_pkg["rend_dist"]
+        rend_dist_alpha = render_pkg["rend_dist_alpha"]
         rend_normal  = render_pkg['rend_normal']
         surf_normal = render_pkg['surf_normal']
         normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
         normal_loss = lambda_normal * (normal_error).mean()
-        dist_loss = lambda_dist * (rend_dist).mean()
+        # dist_loss = lambda_dist * (rend_dist).mean()
+        dist_loss = lambda_dist_alpha * (rend_dist_alpha).mean()
 
         # loss
         total_loss = loss + dist_loss + normal_loss
         
+        if pipe.debug_depth:
+            idx_h, idx_w = image.shape[1] // 2, image.shape[2] // 2
+            # total_loss = rend_dist_alpha[0, idx_h, idx_w]
+            total_loss = (rend_dist_alpha).mean()
         total_loss.backward()
 
         iter_end.record()
 
         with torch.no_grad():
+
+            if pipe.save_images and (iteration < 3 or iteration % 500 == 0):
+                os.makedirs(os.path.join(scene.model_path, "process"), exist_ok=True)
+                torchvision.utils.save_image(image.to('cpu'), os.path.join(scene.model_path, "process", str(iteration) + "_view_" + viewpoint_cam.image_name + ".png"))
+                torch.cuda.empty_cache()
+
+            if pipe.debug_depth:
+                if iteration in [1] + list(range(20, opt.iterations, 20)):
+                    os.makedirs(os.path.join(scene.model_path, "xyz"), exist_ok=True)
+                    with open (os.path.join(scene.model_path, "xyz", "xyz_{}.txt".format(iteration)), "w") as f:
+                        f.write(str(gaussians._xyz))
+                        f.write("\n")
+                        f.write(str(gaussians._xyz.grad))
+                    os.makedirs(os.path.join(scene.model_path, "process"), exist_ok=True)
+                    torchvision.utils.save_image(image.to('cpu'), os.path.join(scene.model_path, "process", str(iteration) + "_view_" + viewpoint_cam.image_name + ".png"))
+                    torch.cuda.empty_cache()
+
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_dist_for_log = 0.4 * dist_loss.item() + 0.6 * ema_dist_for_log

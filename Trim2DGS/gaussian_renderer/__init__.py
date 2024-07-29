@@ -133,6 +133,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # get depth distortion map
     render_dist = allmap[6:7]
+    render_dist_alpha = allmap[8:9]
 
     # psedo surface attributes
     # surf depth is either median or expected by setting depth_ratio to 1 or 0
@@ -151,6 +152,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             'rend_alpha': render_alpha,
             'rend_normal': render_normal,
             'rend_dist': render_dist,
+            'rend_dist_alpha': render_dist_alpha,
             'surf_depth': surf_depth,
             'surf_normal': surf_normal,
     })
