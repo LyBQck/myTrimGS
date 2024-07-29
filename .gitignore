@@ -12,3 +12,7 @@ data
 eval
 *.npz
 **/tmp
+
+output*
+data*
+cmds.sh
