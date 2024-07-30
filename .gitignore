@@ -14,5 +14,9 @@ eval
 **/tmp
 
 output*
+<<<<<<< Updated upstream
 data*
 cmds.sh
+=======
+data*
+>>>>>>> Stashed changes
