@@ -51,6 +51,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     viewpoint_stack = None
     ema_loss_for_log = 0.0
     ema_dist_for_log = 0.0
+    ema_dist_alpha_for_log = 0.0
     ema_normal_for_log = 0.0
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
@@ -88,18 +89,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         surf_normal = render_pkg['surf_normal']
         normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
         normal_loss = lambda_normal * (normal_error).mean()
-        # dist_loss = lambda_dist * (rend_dist).mean()
-        dist_loss = lambda_dist_alpha * (rend_dist_alpha).mean()
+        dist_loss = lambda_dist * (rend_dist).mean()
+        dist_loss_alpha = lambda_dist_alpha * (rend_dist_alpha).sum()
 
         # loss
-        total_loss = loss + dist_loss + normal_loss
+        total_loss = loss + dist_loss + dist_loss_alpha + normal_loss
         
         if pipe.debug_depth:
             idx_h, idx_w = image.shape[1] // 2, image.shape[2] // 2
-            # total_loss = rend_dist_alpha[0, idx_h, idx_w]
-            total_loss = (rend_dist_alpha).mean()
+            total_loss = rend_dist_alpha[0, idx_h, idx_w]
+            # total_loss = (rend_dist_alpha).mean()
         total_loss.backward()
-
+        if pipe.debug_depth:
+            print(gaussians._xyz.grad)
         iter_end.record()
 
         with torch.no_grad():
@@ -123,6 +125,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_dist_for_log = 0.4 * dist_loss.item() + 0.6 * ema_dist_for_log
+            ema_dist_alpha_for_log = 0.4 * dist_loss_alpha.item() + 0.6 * ema_dist_alpha_for_log
             ema_normal_for_log = 0.4 * normal_loss.item() + 0.6 * ema_normal_for_log
 
 
@@ -131,7 +134,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     "Loss": f"{ema_loss_for_log:.{5}f}",
                     "distort": f"{ema_dist_for_log:.{5}f}",
                     "normal": f"{ema_normal_for_log:.{5}f}",
-                    "Points": f"{len(gaussians.get_xyz)}"
+                    "Points": f"{len(gaussians.get_xyz)}",
+                    "distort_a": f"{ema_dist_alpha_for_log:.{5}f}",
                 }
                 progress_bar.set_postfix(loss_dict)
 

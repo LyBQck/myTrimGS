@@ -16,9 +16,11 @@ parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30
 # train args
 parser.add_argument("--tune_depth", action="store_true", help="Whether to tune depth weight during first 30k training iterations")
 parser.add_argument("--tune_depth_from_iter", type=int, default=1000)
-parser.add_argument("--lambda_dist_alpha", type=float, default=0.0)
+parser.add_argument("--lambda_dist_alpha", type=float, default=1e-6)
 parser.add_argument("--lambda_dist", type=float, default=0.0)
 
+# 0: mapped, full; 1: mapped, simplified; 2: orig, full; 3: orig, simplified
+parser.add_argument("--control_id", type=int, default=0)
 parser.add_argument("--debug_depth", action="store_true", help="Whether to debug depth weight")
 parser.add_argument("--skip_train", action="store_true", help="Whether to skip training")
 parser.add_argument("--extra_name", type=str, default="")
@@ -50,7 +52,7 @@ iteration = 30000
 
 def train_scene(gpu, scene, factor):
     cmds = [
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python train.py -s data/dtu_dataset/DTU/{scene} -m {output_dir}/{scene} " + args.tune_depth * (" --tune_depth --tune_depth_from_iter " + str(args.tune_depth_from_iter)) + " --test_iterations " + test_iterations + f" --depth_ratio 1.0 -r {factor} --save_images --lambda_dist {args.lambda_dist} --lambda_dist_alpha {args.lambda_dist_alpha}"  + eval_str + debug_depth,
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python train.py -s data/dtu_dataset/DTU/{scene} -m {output_dir}/{scene} " + args.tune_depth * (" --tune_depth --tune_depth_from_iter " + str(args.tune_depth_from_iter)) + " --test_iterations " + test_iterations + f" --depth_ratio 1.0 -r {factor} --save_images --lambda_dist {args.lambda_dist} --lambda_dist_alpha {args.lambda_dist_alpha} --control_id {args.control_id}"  + eval_str + debug_depth,
         ]
 
     for cmd in cmds:
