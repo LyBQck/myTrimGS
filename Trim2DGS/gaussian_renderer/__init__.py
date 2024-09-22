@@ -127,6 +127,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     render_depth_median = torch.nan_to_num(render_depth_median, 0, 0)
 
     # get expected depth map
+    # out_others[pix_id + DEPTH_OFFSET * H * W] = D; DEPTH_OFFSET = 0
     render_depth_expected = allmap[0:1]
     render_depth_expected = (render_depth_expected / render_alpha)
     render_depth_expected = torch.nan_to_num(render_depth_expected, 0, 0)

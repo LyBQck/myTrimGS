@@ -14,30 +14,17 @@ parser.add_argument("--eval_mode", action="store_true")
 parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
 
 # train args
+parser.add_argument("--depth_weight", type=str, default="0.0")
+parser.add_argument("--depth_opac_weight", type=str, default="0.0")
 parser.add_argument("--tune_depth", action="store_true", help="Whether to tune depth weight during first 30k training iterations")
-parser.add_argument("--tune_depth_from_iter", type=int, default=1000)
-parser.add_argument("--lambda_dist_alpha", type=float, default=1e-6)
-parser.add_argument("--lambda_dist", type=float, default=0.0)
+parser.add_argument("--tune_depth_from_iter", type=int, default=7000)
 
-# 0: mapped, full; 1: mapped, simplified; 2: orig, full; 3: orig, simplified
-parser.add_argument("--control_id", type=int, default=0)
-parser.add_argument("--debug_depth", action="store_true", help="Whether to debug depth weight")
 parser.add_argument("--skip_train", action="store_true", help="Whether to skip training")
-parser.add_argument("--eval_iteration", type=int, default=30000)
-
-parser.add_argument("--base_name", type=str, default="dtu_alpha_depth_multi_scenes/")
 parser.add_argument("--extra_name", type=str, default="")
-parser.add_argument("--ckpt_path", type=str, default="")
 args = parser.parse_args(sys.argv[1:])
 
-scenes = ['scan24', 'scan37', 'scan40', 'scan55', 'scan63', 'scan65', 'scan69', 'scan83', 'scan97', 'scan105', 'scan106', 'scan110', 'scan114', 'scan118', 'scan122']
-scenes = [ 'scan65', 'scan69', 'scan83', 'scan97', 'scan105', 'scan106', 'scan110', 'scan114', 'scan118', 'scan122']
-# scenes = ['scan24']
-if args.debug_depth:
-    scenes = ['scan24']
-
+scenes = [24, 40, 55, 63, 106, 110, 118, 122]
 eval_str = args.eval_mode * " --eval"
-debug_depth = args.debug_depth * " --debug_depth --densify_from_iter=10000 --opacity_reset_interval=10000 --save_images"
 
 factors = [2] * len(scenes)
 
@@ -47,18 +34,20 @@ if args.gpu == -1:
 else:
     excluded_gpus = full_gpus - set([args.gpu])
 
-output_dir = "output0/" + args.base_name + args.tune_depth * ("tune_" + str(args.tune_depth_from_iter)+ "_") + args.extra_name + "/DTU_2DGS"
+depth_weight = args.depth_weight
+depth_opac_weight = args.depth_opac_weight
+
+output_dir = "output0/dtu_alpha_depth_multi_scenes/" + "d_wgt_" + depth_weight.replace(".", "-") + "_d-opac_wgt_" + depth_opac_weight.replace(".", "-") + args.tune_depth * ("_tune_" + str(args.tune_depth_from_iter)+ "_") + args.extra_name + "/DTU_3DGS"
 test_iterations = " ".join([str(i) for i in args.test_iterations])
 
 jobs = list(zip(scenes, factors))
 
-position_lr_init = {"scan63": 0.0000016}
-iteration = args.eval_iteration
+normal_weight = {24:0.1, 63:0.1, 65:0.1, 97:0.01, 110:0.01, 118:0.02}
+prune_ratio = {55:0.2, 114:0.2}
 
 def train_scene(gpu, scene, factor):
-    ckpt_path = f"nn_sdf/output/{scene}/model.pth"
     cmds = [
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python train.py -s data/dtu_dataset/DTU/{scene} -m {output_dir}/{scene} " + args.tune_depth * (" --tune_depth --tune_depth_from_iter " + str(args.tune_depth_from_iter)) + " --test_iterations " + test_iterations + f" --depth_ratio 1.0 -r {factor} --save_images --lambda_dist {args.lambda_dist} --lambda_dist_alpha {args.lambda_dist_alpha} --control_id {args.control_id}"  + eval_str + debug_depth + " --ckpt_path=" + ckpt_path,
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python train.py -s data/dtu_dataset/DTU/scan{scene} -m {output_dir}/scan{scene} -r {factor} --test_iterations " + test_iterations + " --depth_weight=" + depth_weight + " --depth_opac_weight=" + depth_opac_weight + args.tune_depth * (" --tune_depth --tune_depth_from_iter " + str(args.tune_depth_from_iter)) + eval_str
         ]
 
     for cmd in cmds:
@@ -67,15 +56,16 @@ def train_scene(gpu, scene, factor):
     return True
 
 def extract_and_eval(gpu, scene):
-    scan_id = scene[4:]
+    iteration_local = 30000
     cmds = [
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python cull_pcd.py -m {output_dir}/{scene} --iteration {iteration}",
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python render.py -s data/dtu_dataset/DTU/{scene} -m {output_dir}/{scene} --skip_train --depth_ratio 1.0 --num_cluster 1 --iteration {iteration} --voxel_size 0.004 --voxel_size 0.004 --sdf_trunc 0.016 --depth_trunc 3.0",
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python scripts/eval_dtu/evaluate_single_scene.py --input_mesh {output_dir}/{scene}/train/ours_{iteration}/fuse_post.ply --scan_id {scan_id} --output_dir {output_dir}/{scene}/train/ours_{iteration} --mask_dir data/dtu_dataset/DTU --DTU data/dtu_dataset/Official_DTU_Dataset",
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python scripts/eval_dtu_pcd/evaluate_single_scene.py --input_pcd {output_dir}/{scene}/point_cloud/iteration_{iteration}/point_cloud.ply --scan_id {scan_id} --output_dir {output_dir}/{scene}/train/ours_{iteration} --mask_dir data/dtu_dataset/DTU --DTU data/dtu_dataset/Official_DTU_Dataset",
+            # extract
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python extract_mesh_tsdf.py -s data/dtu_dataset/DTU/scan{scene} -m {output_dir}/scan{scene} --iteration {iteration_local} --num_cluster 1 --voxel_size 0.004 --sdf_trunc 0.016 --depth_trunc 3.0" + eval_str,
+            # eval
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python eval_dtu/evaluate_single_scene.py --input_mesh {output_dir}/scan{scene}/tsdf/ours_{iteration_local}/mesh_post.ply --scan_id {scene} --output_dir {output_dir}/scan{scene}/tsdf/ours_{iteration_local} --mask_dir data/dtu_dataset/DTU --DTU data/dtu_dataset/Official_DTU_Dataset",
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python eval_dtu_pcd/evaluate_single_scene.py --input_pcd {output_dir}/scan{scene}/point_cloud/iteration_{iteration_local}/point_cloud.ply --scan_id {scene} --output_dir {output_dir}/scan{scene}/train/ours_{iteration_local} --mask_dir data/dtu_dataset/DTU --DTU data/dtu_dataset/Official_DTU_Dataset",
             # eval render
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python render.py -s data/dtu_dataset/DTU/{scene} -m {output_dir}/{scene} --skip_mesh --iteration {iteration}",
-            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python metrics.py -m {output_dir}/{scene}"
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python render.py -m {output_dir}/scan{scene} --skip_train" + eval_str,
+            f"OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES={gpu} python metrics.py -m {output_dir}/scan{scene}"
         ]
 
     for cmd in cmds:

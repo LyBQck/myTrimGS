@@ -22,6 +22,8 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from geometry_regularization.reg_loss import geometry_regularization
+from nn_sdf.sdf_network import SdfNet
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -53,6 +55,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_dist_for_log = 0.0
     ema_dist_alpha_for_log = 0.0
     ema_normal_for_log = 0.0
+    
+    sdf_net = SdfNet(latent_dim=dataset.latent_dim).to("cuda")
+    sdf_net.load_state_dict(torch.load(dataset.ckpt_path))
+    sdf_net.eval()
+    for i in sdf_net.parameters():
+        i.requires_grad = False
+    sdf_loss_fn = torch.nn.SmoothL1Loss(beta=10.0)
+    # sdf_loss_fn = torch.nn.L1Loss()
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
@@ -82,7 +92,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
         lambda_dist = opt.lambda_dist if iteration > 3000 else 0.0
         lambda_dist_alpha = opt.lambda_dist_alpha if pipe.tune_depth and (iteration > pipe.tune_depth_from_iter) else 0.0
-
+        lambda_geometry = opt.lambda_geometry if iteration > 5000 else 0.0
+        
         rend_dist = render_pkg["rend_dist"]
         rend_dist_alpha = render_pkg["rend_dist_alpha"]
         rend_normal  = render_pkg['rend_normal']
@@ -92,8 +103,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         dist_loss = lambda_dist * (rend_dist).mean()
         dist_loss_alpha = lambda_dist_alpha * (rend_dist_alpha).sum()
 
+        # geometry_loss = geometry_regularization(viewpoint_cam, gaussians, pipe, torch.zeros_like(background))
+        geometry_loss = lambda_geometry * sdf_loss_fn(sdf_net(gaussians.get_xyz), torch.zeros_like(sdf_net(gaussians.get_xyz)))
         # loss
-        total_loss = loss + dist_loss + dist_loss_alpha + normal_loss
+        total_loss = loss + dist_loss + dist_loss_alpha + normal_loss + geometry_loss
         
         if pipe.debug_depth:
             idx_h, idx_w = image.shape[1] // 2, image.shape[2] // 2
@@ -197,6 +210,10 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
+def write_log(logfile, message):
+    with open(logfile, 'a') as f:
+        f.write(message + "\n")
+
 @torch.no_grad()
 def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
     if tb_writer:
@@ -251,6 +268,8 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+                write_log(os.path.join(scene.model_path, "log.txt"), "[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+                
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)

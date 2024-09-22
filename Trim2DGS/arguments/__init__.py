@@ -54,6 +54,11 @@ class ModelParams(ParamGroup):
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False
+
+        # nn
+        self.latent_dim = 128
+        self.ckpt_path = ""
+        
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -92,6 +97,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_dist_alpha = 1e-6
         self.lambda_normal = 0.05
         self.opacity_cull = 0.05
+        
+        # self.lambda_geometry = 1e-5
+        self.lambda_geometry = 1e-1
 
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
